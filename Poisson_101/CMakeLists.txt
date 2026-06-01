@@ -1,0 +1,6 @@
+cmake_minimum_required(VERSION 3.16)
+find_package(deal.II REQUIRED)
+project(poisson_3d)
+deal_ii_initialize_cached_variables()
+add_executable(poisson_3d poisson_3d.cpp)
+deal_ii_setup_target(poisson_3d)
