@@ -136,13 +136,11 @@ const Vector<double>& Poisson<dim>::get_rhs() const
 }
 
 template <int dim>
-void Poisson<dim>::setup_system(int refinement_level)
+void Poisson<dim>::setup_system(int n_cells_per_edge)
 {
     // Make grid and distribute dofs
 
-    GridGenerator::hyper_cube(triangulation, -1, 1);
-    triangulation.refine_global(refinement_level); // n_cells = 2^(dim*refinement_level)
-    // Cells per direction TODO
+    GridGenerator::subdivided_hyper_cube(triangulation, n_cells_per_edge, -1.0, 1.0); // Creates a grid of n_cells_per_edge^dim cells in the unit cube [-1, 1]^dim
 
     dof_handler.distribute_dofs(fe); // Assigns dofs to the mesh vertices, edges, faces, and cells
     
@@ -306,13 +304,13 @@ double electrostatic_energy(const Vector<double> &sol, const Vector<double> &rhs
 
 int main()
 {
-    int degree = 6;
+    int degree = 2;
 
-    for(int refinement_level = 1; refinement_level <= 5; ++refinement_level)
+    for(int n_cells_per_edge = 2; n_cells_per_edge <= 20; n_cells_per_edge += 2)
     {
         // std::cout << "Running Poisson solver with refinement level " << refinement_level << "..." << std::endl;
         Poisson<3> poisson_problem(degree);
-        poisson_problem.run(refinement_level);
+        poisson_problem.run(n_cells_per_edge);
 
         const Vector<double> &solution = poisson_problem.get_solution();
         const Vector<double> &rhs = poisson_problem.get_rhs();
@@ -322,10 +320,10 @@ int main()
 
         // Debug
         cout<< "Solution vector size: " << solution.size() << std::endl;
-        cout<< "RHS vector size: " << rhs.size() << std::endl;
+        // cout<< "RHS vector size: " << rhs.size() << std::endl;
 
         double energy = electrostatic_energy(solution, rhs);
-        std::cout << "Electrostatic energy at refinement level " << refinement_level << ": " << energy << std::endl;
+        std::cout << "Electrostatic energy at n_cells_per_edge " << n_cells_per_edge << ": " << energy << std::endl;
     }
 }
 
