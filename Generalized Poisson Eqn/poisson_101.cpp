@@ -24,14 +24,14 @@
 
 using namespace dealii;
 
-#define r_c 0.5 // Less than half the distance between the two nuclei
+#define r_c 0.7 // Less than half the distance between the two nuclei
 #define r_c_squared r_c * r_c
 #define r_c_8 r_c_squared * r_c_squared * r_c_squared * r_c_squared
 #define PI 3.14159265358979323846
 
 
 template <int dim>
-class SmearedCharge : public Function<dim> // Inherit from Function class
+class SmearedCharge : public Function<dim> 
 {
     public:
         SmearedCharge() : Function<dim>() {}
@@ -63,7 +63,7 @@ class SmearedCharge : public Function<dim> // Inherit from Function class
 };
 
 template <int dim>
-class CoullombPotential : public Function<dim> // Inherit from Function class
+class CoullombPotential : public Function<dim> 
 {
     public:
         CoullombPotential() : Function<dim>() {}
@@ -96,17 +96,16 @@ class Poisson
 
         const Vector<double> &get_solution() const;
         const Vector<double> &get_rhs() const;
-
-    private:
-        void setup_system(int refinement_level);
+        
+        void setup_system(int n_cells_per_edge, double start = -1.0, double end = 1.0);
         void assemble_system(SmearedCharge<dim> &forcing_function, CoullombPotential<dim> &boundary_condition);
         void solve(bool verbose);
         void output_results(bool verbose) const;
 
         // Mesh, finite element (basis functions), and dof handler (dof to mesh mapping)
         Triangulation<dim> triangulation;
-        FE_Q<dim> fe;
         DoFHandler<dim> dof_handler;
+        FE_Q<dim> fe;
 
         // Containers
         SparsityPattern sparsity_pattern;
@@ -118,9 +117,7 @@ class Poisson
 
 template <int dim>
 Poisson<dim>::Poisson(int degree) : fe(degree), dof_handler(triangulation)
-{
-    
-}
+{ }
 
 // Returns pointer to solution vector
 template <int dim>
@@ -136,11 +133,11 @@ const Vector<double>& Poisson<dim>::get_rhs() const
 }
 
 template <int dim>
-void Poisson<dim>::setup_system(int n_cells_per_edge)
+void Poisson<dim>::setup_system(int n_cells_per_edge, double start, double end)
 {
     // Make grid and distribute dofs
-
-    GridGenerator::subdivided_hyper_cube(triangulation, n_cells_per_edge, -1.0, 1.0); // Creates a grid of n_cells_per_edge^dim cells in the unit cube [-1, 1]^dim
+    GridGenerator::subdivided_hyper_cube(triangulation, n_cells_per_edge, start, end);
+    cout<< "Number of active cells: " << triangulation.n_active_cells() << std::endl; 
 
     dof_handler.distribute_dofs(fe); // Assigns dofs to the mesh vertices, edges, faces, and cells
     
@@ -159,43 +156,51 @@ void Poisson<dim>::setup_system(int n_cells_per_edge)
 template <int dim>
 void Poisson<dim>::assemble_system(SmearedCharge<dim> &forcing_function, CoullombPotential<dim> &boundary_condition)
 {
-    QGauss<dim> quadrature_formula(fe.degree + 1); // Quadrature
-    FEValues<dim> fe_values(fe, quadrature_formula, update_values | update_gradients | update_JxW_values | update_quadrature_points); 
+    QGauss<dim> matrix_quad(fe.degree + 1); // Quadrature
+    QIterated<dim> rhs_quad(QGauss<1>(4), 2); // 4 points per interval, 2 intervals per edge -> 8 points per edge -> 512 points in total for 3D
+    FEValues<dim> fe_matrix(fe, matrix_quad, update_values | update_gradients | update_JxW_values); 
+    FEValues<dim> fe_rhs(fe, rhs_quad, update_values | update_JxW_values | update_quadrature_points);
     const unsigned int dofs_per_cell = fe.n_dofs_per_cell();
-    const unsigned int n_q_points = quadrature_formula.size();
-    (void) n_q_points;
 
     // Local cell matrix and rhs vector
     FullMatrix<double> cell_matrix(dofs_per_cell, dofs_per_cell);
     Vector<double> cell_rhs(dofs_per_cell);
 
-    // Local array mapping local DoF index to global matrix index
     std::vector<types::global_dof_index> local_dof_indices(dofs_per_cell); 
 
     // a_ij =  summation ( grad phi_i * grad phi_j * jacobian * quadrature weight )
     // b_i =  summation ( f(x) * phi_i * jacobian * quadrature weight )
     // phi_i and phi_j are the basis functions
+
     for (const auto &cell : dof_handler.active_cell_iterators())
     {
         cell_matrix = 0;
         cell_rhs = 0;
 
-        fe_values.reinit(cell); // When different cells have different geometry
+        fe_matrix.reinit(cell);
+        fe_rhs.reinit(cell);
 
         // Pointer to quadrature points for this cell
-        const std::vector<Point<dim>> &quadrature_points = fe_values.get_quadrature_points();
+        const std::vector<Point<dim>> &quadrature_points_r = fe_rhs.get_quadrature_points();
 
-        for (const unsigned int q_index : fe_values.quadrature_point_indices())
+        for (const unsigned int q_index : fe_matrix.quadrature_point_indices())
         {
-            const double f_q = forcing_function.value(quadrature_points[q_index]);
-
-            for (const unsigned int i : fe_values.dof_indices())
+            for (const unsigned int i : fe_matrix.dof_indices())
             {
-                for (const unsigned int j : fe_values.dof_indices())
+                for (const unsigned int j : fe_matrix.dof_indices())
                 {
-                    cell_matrix(i, j) += fe_values.shape_grad(i, q_index) * fe_values.shape_grad(j, q_index) * fe_values.JxW(q_index); 
+                    cell_matrix(i, j) += fe_matrix.shape_grad(i, q_index) * fe_matrix.shape_grad(j, q_index) * fe_matrix.JxW(q_index); 
                 }
-                cell_rhs(i) += f_q * fe_values.shape_value(i, q_index) * fe_values.JxW(q_index);
+            }
+        }
+
+        for(const unsigned int q_index : fe_rhs.quadrature_point_indices())
+        {
+            const double f_q = forcing_function.value(quadrature_points_r[q_index]);
+
+            for (const unsigned int i : fe_rhs.dof_indices())
+            {
+                cell_rhs(i) += f_q * fe_rhs.shape_value(i, q_index) * fe_rhs.JxW(q_index);
             }
         }
 
@@ -204,9 +209,9 @@ void Poisson<dim>::assemble_system(SmearedCharge<dim> &forcing_function, Coullom
         cell->get_dof_indices(local_dof_indices);
 
         // Add local contributions to global matrix and rhs vector
-        for (const unsigned int i : fe_values.dof_indices())
+        for (const unsigned int i : fe_matrix.dof_indices())
         {
-            for (const unsigned int j : fe_values.dof_indices())
+            for (const unsigned int j : fe_matrix.dof_indices())
             {
                 system_matrix.add(local_dof_indices[i], local_dof_indices[j], cell_matrix(i, j));
             }
@@ -214,7 +219,7 @@ void Poisson<dim>::assemble_system(SmearedCharge<dim> &forcing_function, Coullom
         }
     }
 
-    // Important!
+    // Why?
     system_rhs_before = system_rhs;
 
     // USEFULL
@@ -230,7 +235,6 @@ void Poisson<dim>::solve(bool verbose)
     SolverControl solver_control(1000, 1e-12 * system_rhs.l2_norm());
     SolverCG<Vector<double>> solver(solver_control);
 
-    // Initially no preconditioner
     solver.solve(system_matrix, solution, system_rhs, PreconditionIdentity());
 
     if(verbose)
@@ -256,14 +260,14 @@ void Poisson<dim>::output_results(bool verbose) const
 }
 
 template <int dim>
-void Poisson<dim>::run(int refinement_level, bool verbose)
+void Poisson<dim>::run(int n_cells_per_edge, bool verbose)
 {
     if (verbose)
     {
-        std::cout << "Setting up system with refinement level " << refinement_level << "..." << std::endl;
+        std::cout << "Setting up system with " << n_cells_per_edge << " cells per edge..." << std::endl;
     }
 
-    setup_system(refinement_level); // Now dynamically controlled!
+    setup_system(n_cells_per_edge); // Now dynamically controlled!
 
     SmearedCharge<dim> forcing_term;
     CoullombPotential<dim> boundary_term;
@@ -295,35 +299,78 @@ void Poisson<dim>::run(int refinement_level, bool verbose)
     
 }
 
-double electrostatic_energy(const Vector<double> &sol, const Vector<double> &rhs)
-{
-    double I =  sol * rhs; 
 
-    return -0.5 * I;
+double charge3D(SmearedCharge<3> &forcing_function, FE_Q<3>& fe, DoFHandler<3>& dof_handler)
+{
+    double total_charge = 0.0;
+
+    QIterated<3> quad(QGauss<1>(4), 2); // 4 points per interval, 2 intervals per edge -> 8 points per edge -> 512 points in total for 3D
+    FEValues<3> fe_values(fe, quad, update_values | update_JxW_values | update_quadrature_points);
+
+    // update_values: value if basis function at quadrature point
+    // update_JxW_values: jacobian * quadrature weight at quadrature point
+    // update_quadrature_points: coordinates of quadrature points
+
+    for (const auto &cell : dof_handler.active_cell_iterators())
+    {
+        fe_values.reinit(cell);
+        const std::vector<Point<3>> &quadrature_points = fe_values.get_quadrature_points();
+
+        for (const unsigned int q_index : fe_values.quadrature_point_indices())
+        {
+            total_charge += forcing_function.value(quadrature_points[q_index]) * fe_values.JxW(q_index);
+        }
+    }
+
+    return total_charge;
+}
+
+double electrostatic_energy(SmearedCharge<3> &forcing_function, DoFHandler<3>& dof_handler, FE_Q<3>& fe, const Vector<double>& solution)
+{
+    double energy = 0.0;
+
+    QIterated<3> quad(QGauss<1>(4), 2); 
+    FEValues<3> fe_values(fe, quad, update_values | update_JxW_values | update_quadrature_points);
+
+    for (const auto &cell : dof_handler.active_cell_iterators())
+    {
+        fe_values.reinit(cell);
+
+        // Get quadrature points and solution values at quadrature points
+        const std::vector<Point<3>> &quadrature_points = fe_values.get_quadrature_points();
+        std::vector<double> solution_values(fe_values.n_quadrature_points);
+        fe_values.get_function_values(solution, solution_values);
+
+        for (const unsigned int q_index : fe_values.quadrature_point_indices())
+        {
+            double phi_q = solution_values[q_index];
+            double rho_q = forcing_function.value(quadrature_points[q_index]);
+            energy += 0.5 * rho_q * phi_q * fe_values.JxW(q_index); // Jacobian * quadrature weight
+        }
+    }
+
+    return energy;
 }
 
 int main()
 {
-    int degree = 2;
+    Poisson<3> poisson_problem(3);  
+    SmearedCharge<3> forcing_term;
+    CoullombPotential<3> boundary_term;
 
-    for(int n_cells_per_edge = 2; n_cells_per_edge <= 20; n_cells_per_edge += 2)
-    {
-        // std::cout << "Running Poisson solver with refinement level " << refinement_level << "..." << std::endl;
-        Poisson<3> poisson_problem(degree);
-        poisson_problem.run(n_cells_per_edge);
+    forcing_term.charge = 13.0;
+    boundary_term.charge = 13.0;
 
-        const Vector<double> &solution = poisson_problem.get_solution();
-        const Vector<double> &rhs = poisson_problem.get_rhs();
+    poisson_problem.setup_system(10, -10.0, 10.0);
+    poisson_problem.assemble_system(forcing_term, boundary_term);
 
-        //Total charge
-        cout<< "Total Charge: " << rhs.l1_norm() << std::endl;
+    double total_charge = charge3D(forcing_term, poisson_problem.fe, poisson_problem.dof_handler);
+    std::cout << "Total charge in the system: " << total_charge << std::endl;
 
-        // Debug
-        cout<< "Solution vector size: " << solution.size() << std::endl;
-        // cout<< "RHS vector size: " << rhs.size() << std::endl;
+    poisson_problem.solve(true);
+    poisson_problem.output_results(true);
 
-        double energy = electrostatic_energy(solution, rhs);
-        std::cout << "Electrostatic energy at n_cells_per_edge " << n_cells_per_edge << ": " << energy << std::endl;
-    }
+    double energy = electrostatic_energy(forcing_term, poisson_problem.dof_handler, poisson_problem.fe, poisson_problem.get_solution());
+    std::cout << "Electrostatic energy of the system: " << energy << std::endl;
 }
 
