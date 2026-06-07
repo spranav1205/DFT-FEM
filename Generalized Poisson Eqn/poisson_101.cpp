@@ -157,7 +157,7 @@ template <int dim>
 void Poisson<dim>::assemble_system(SmearedCharge<dim> &forcing_function, CoullombPotential<dim> &boundary_condition)
 {
     QGauss<dim> matrix_quad(fe.degree + 1); // Quadrature
-    QIterated<dim> rhs_quad(QGauss<1>(4), 2); // 4 points per interval, 2 intervals per edge -> 8 points per edge -> 512 points in total for 3D
+    QIterated<dim> rhs_quad(QGauss<1>(6), 2); // 6 points per interval, 2 intervals per edge -> 8 points per edge -> 512 points in total for 3D
     FEValues<dim> fe_matrix(fe, matrix_quad, update_values | update_gradients | update_JxW_values); 
     FEValues<dim> fe_rhs(fe, rhs_quad, update_values | update_JxW_values | update_quadrature_points);
     const unsigned int dofs_per_cell = fe.n_dofs_per_cell();
@@ -304,7 +304,7 @@ double charge3D(SmearedCharge<3> &forcing_function, FE_Q<3>& fe, DoFHandler<3>& 
 {
     double total_charge = 0.0;
 
-    QIterated<3> quad(QGauss<1>(4), 2); // 4 points per interval, 2 intervals per edge -> 8 points per edge -> 512 points in total for 3D
+    QIterated<3> quad(QGauss<1>(6), 2); // 6 points per interval, 2 intervals per edge -> 20 points per edge -> 8000 points in total for 3D
     FEValues<3> fe_values(fe, quad, update_values | update_JxW_values | update_quadrature_points);
 
     // update_values: value if basis function at quadrature point
@@ -329,7 +329,7 @@ double electrostatic_energy(SmearedCharge<3> &forcing_function, DoFHandler<3>& d
 {
     double energy = 0.0;
 
-    QIterated<3> quad(QGauss<1>(4), 2); 
+    QIterated<3> quad(QGauss<1>(6), 2); // 6 points per interval, 2 intervals per edge -> 20 points per edge -> 8000 points in total for 3D
     FEValues<3> fe_values(fe, quad, update_values | update_JxW_values | update_quadrature_points);
 
     for (const auto &cell : dof_handler.active_cell_iterators())
@@ -361,7 +361,7 @@ int main()
     forcing_term.charge = 13.0;
     boundary_term.charge = 13.0;
 
-    poisson_problem.setup_system(10, -10.0, 10.0);
+    poisson_problem.setup_system(16, -10.0, 10.0);
     poisson_problem.assemble_system(forcing_term, boundary_term);
 
     double total_charge = charge3D(forcing_term, poisson_problem.fe, poisson_problem.dof_handler);
@@ -374,3 +374,79 @@ int main()
     std::cout << "Electrostatic energy of the system: " << energy << std::endl;
 }
 
+// #include <fstream>
+
+// int main()
+// {
+//     SmearedCharge<3> forcing_term;
+//     CoullombPotential<3> boundary_term;
+
+//     forcing_term.charge = 13.0;
+//     boundary_term.charge = 13.0;
+
+//     std::ofstream file("energy_convergence.csv");
+//     file << "cells_per_edge,total_cells,total_charge,energy\n";
+
+//     for (unsigned int cells_per_edge = 4;
+//          cells_per_edge <= 20;
+//          cells_per_edge += 2)
+//     {
+//         std::cout << "\n=====================================\n";
+//         std::cout << "Cells per edge = "
+//                   << cells_per_edge
+//                   << std::endl;
+
+//         Poisson<3> poisson_problem(3);
+
+//         poisson_problem.setup_system(
+//             cells_per_edge,
+//             -10.0,
+//              10.0);
+
+//         poisson_problem.assemble_system(
+//             forcing_term,
+//             boundary_term);
+
+//         const double total_charge =
+//             charge3D(
+//                 forcing_term,
+//                 poisson_problem.fe,
+//                 poisson_problem.dof_handler);
+
+//         poisson_problem.solve(false);
+
+//         const double energy =
+//             electrostatic_energy(
+//                 forcing_term,
+//                 poisson_problem.dof_handler,
+//                 poisson_problem.fe,
+//                 poisson_problem.get_solution());
+
+//         const unsigned int total_cells =
+//             poisson_problem.triangulation.n_active_cells();
+
+//         file << cells_per_edge << ","
+//              << total_cells << ","
+//              << total_charge << ","
+//              << energy << "\n";
+
+//         std::cout << "Cells          : "
+//                   << total_cells
+//                   << std::endl;
+
+//         std::cout << "Total charge   : "
+//                   << total_charge
+//                   << std::endl;
+
+//         std::cout << "Energy         : "
+//                   << energy
+//                   << std::endl;
+//     }
+
+//     file.close();
+
+//     std::cout
+//         << "\nResults written to energy_convergence.csv\n";
+
+//     return 0;
+// }
