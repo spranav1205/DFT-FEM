@@ -25,8 +25,8 @@
 using namespace dealii;
 
 #define r_c 0.7 // Less than half the distance between the two nuclei
-#define r_c_squared r_c * r_c
-#define r_c_8 r_c_squared * r_c_squared * r_c_squared * r_c_squared
+#define r_c_squared (r_c * r_c)
+#define r_c_8 (r_c_squared * r_c_squared * r_c_squared * r_c_squared)
 #define PI 3.14159265358979323846
 
 
@@ -83,7 +83,7 @@ class CoullombPotential : public Function<dim>
             if (r < 1e-12)
                 return charge / 1e-12;
 
-            return charge / r;
+            return charge / (4.0 * M_PI * r);
         }
 };
 
@@ -232,7 +232,7 @@ void Poisson<dim>::assemble_system(SmearedCharge<dim> &forcing_function, Coullom
 template <int dim>
 int Poisson<dim>::solve(bool verbose)
 {
-    SolverControl solver_control(1000, 1e-12 * system_rhs.l2_norm()); // Max 1000 iterations, tolerance 1e-12 * ||b|| (initial residual)
+    SolverControl solver_control(1000, 1e-10); // Max 1000 iterations, tolerance 1e-10 i.e. ||Ax-b|| < 1e-10
     SolverCG<Vector<double>> solver(solver_control);
 
     solver.solve(system_matrix, solution, system_rhs, PreconditionIdentity());
@@ -383,14 +383,14 @@ int main()
     SmearedCharge<3> forcing_term;
     CoullombPotential<3> boundary_term;
 
-    forcing_term.charge = 13.0;
-    boundary_term.charge = 13.0;
+    forcing_term.charge = 12.0;
+    boundary_term.charge = 12.0;
 
     std::ofstream file("energy_convergence.csv");
     file << "cells_per_edge,total_cells,total_charge,energy,steps\n";
 
-    for (unsigned int cells_per_edge = 10;
-         cells_per_edge <= 20;
+    for (unsigned int cells_per_edge = 16;
+         cells_per_edge <= 24;
          cells_per_edge += 2)
     {
         std::cout << "\n=====================================\n";
@@ -402,8 +402,8 @@ int main()
 
         poisson_problem.setup_system(
             cells_per_edge,
-            -15.0,
-             15.0);
+            -5.0,
+             5.0);
 
         poisson_problem.assemble_system(
             forcing_term,
@@ -415,7 +415,7 @@ int main()
                 poisson_problem.fe,
                 poisson_problem.dof_handler);
 
-        int steps = poisson_problem.solve(false);
+        int steps = poisson_problem.solve(true);
 
         const double energy =
             electrostatic_energy(
