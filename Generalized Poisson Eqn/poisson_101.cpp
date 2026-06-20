@@ -21,6 +21,8 @@
 #include <cmath>
 #include <map>
 #include <vector>
+#include <iomanip>  // Required for std::setprecision
+#include <chrono>   // Required for high-precision timing
 
 using namespace dealii;
 
@@ -81,7 +83,7 @@ class CoullombPotential : public Function<dim>
             double r = std::sqrt(r_squared);
 
             if (r < 1e-12)
-                return charge / 1e-12;
+                return charge / 1e-12; // TODO
 
             return charge / (4.0 * M_PI * r);
         }
@@ -100,7 +102,7 @@ class Poisson
         void setup_system(int n_cells_per_edge, double start = -1.0, double end = 1.0);
         void assemble_system(SmearedCharge<dim> &forcing_function, CoullombPotential<dim> &boundary_condition);
         int solve(bool verbose);
-        void output_results(bool verbose) const;
+        void output_results(const std::string &filename, bool verbose) const;
 
         // Mesh, finite element (basis functions), and dof handler (dof to mesh mapping)
         Triangulation<dim> triangulation;
@@ -235,7 +237,8 @@ int Poisson<dim>::solve(bool verbose)
     SolverControl solver_control(1000, 1e-10); // Max 1000 iterations, tolerance 1e-10 i.e. ||Ax-b|| < 1e-10
     SolverCG<Vector<double>> solver(solver_control);
 
-    solver.solve(system_matrix, solution, system_rhs, PreconditionIdentity());
+    // solver.solve(system_matrix, solution, system_rhs, PreconditionIdentity());
+    solver.solve(system_matrix, solution, system_rhs, JacobiPreconditioner());
 
     if(verbose)
     {
@@ -246,18 +249,20 @@ int Poisson<dim>::solve(bool verbose)
 }
 
 template <int dim>
-void Poisson<dim>::output_results(bool verbose) const
+void Poisson<dim>::output_results(const std::string &filename, bool verbose) const
 {
     DataOut<dim> data_out;
     data_out.attach_dof_handler(dof_handler);
     data_out.add_data_vector(solution, "potential");
     data_out.build_patches();
-    std::ofstream output("poisson-solution.vtu");
+    
+    // Save to the dedicated folder path provided in the filename string
+    std::ofstream output(filename);
     data_out.write_vtu(output);
     
     if (verbose)
     {
-        std::cout << "  Results written to poisson-solution.vtu" << std::endl;
+        std::cout << "  Results written to " << filename << std::endl;
     }
 }
 
@@ -306,7 +311,7 @@ double charge3D(SmearedCharge<3> &forcing_function, FE_Q<3>& fe, DoFHandler<3>& 
 {
     double total_charge = 0.0;
 
-    QIterated<3> quad(QGauss<1>(6), 2); // 6 points per interval, 2 intervals per edge -> 20 points per edge -> 8000 points in total for 3D
+    QIterated<3> quad(QGauss<1>(6), 2); // 6 points per interval, 2 intervals per edge 
     FEValues<3> fe_values(fe, quad, update_values | update_JxW_values | update_quadrature_points);
 
     // update_values: value if basis function at quadrature point
@@ -376,8 +381,6 @@ double electrostatic_energy(SmearedCharge<3> &forcing_function, DoFHandler<3>& d
 //     std::cout << "Electrostatic energy of the system: " << energy << std::endl;
 // }
 
-#include <fstream>
-
 int main()
 {
     SmearedCharge<3> forcing_term;
@@ -386,70 +389,62 @@ int main()
     forcing_term.charge = 12.0;
     boundary_term.charge = 12.0;
 
-    std::ofstream file("energy_convergence.csv");
-    file << "cells_per_edge,total_cells,total_charge,energy,steps\n";
+    std::ofstream file("output/energy_convergence.csv");
+    
+    file << "cells_per_edge,total_cells,total_charge,energy,steps,solver_time_sec\n";
 
     for (unsigned int cells_per_edge = 16;
-         cells_per_edge <= 24;
-         cells_per_edge += 2)
+         cells_per_edge <= 48;
+         cells_per_edge += 8)
     {
         std::cout << "\n=====================================\n";
-        std::cout << "Cells per edge = "
-                  << cells_per_edge
-                  << std::endl;
+        std::cout << "Cells per edge = " << cells_per_edge << std::endl;
 
         Poisson<3> poisson_problem(3);
 
-        poisson_problem.setup_system(
-            cells_per_edge,
-            -5.0,
-             5.0);
+        poisson_problem.setup_system(cells_per_edge, -5.0, 5.0);
+        poisson_problem.assemble_system(forcing_term, boundary_term);
 
-        poisson_problem.assemble_system(
+        const double total_charge = charge3D(
             forcing_term,
-            boundary_term);
+            poisson_problem.fe,
+            poisson_problem.dof_handler);
 
-        const double total_charge =
-            charge3D(
-                forcing_term,
-                poisson_problem.fe,
-                poisson_problem.dof_handler);
-
+        // Time measurement
+        auto start_time = std::chrono::high_resolution_clock::now();
+        
         int steps = poisson_problem.solve(true);
+        
+        auto end_time = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<double> elapsed_seconds = end_time - start_time;
+    
+        // Calculation
+        const double energy = electrostatic_energy(
+            forcing_term,
+            poisson_problem.dof_handler,
+            poisson_problem.fe,
+            poisson_problem.get_solution());
 
-        const double energy =
-            electrostatic_energy(
-                forcing_term,
-                poisson_problem.dof_handler,
-                poisson_problem.fe,
-                poisson_problem.get_solution());
-
-        const unsigned int total_cells =
-            poisson_problem.triangulation.n_active_cells();
+        const unsigned int total_cells = poisson_problem.triangulation.n_active_cells();
 
         file << cells_per_edge << ","
              << total_cells << ","
              << total_charge << ","
-             << energy << ","
-             << steps << "\n";
+             << std::fixed << std::setprecision(8) << energy << ","
+             << steps << ","
+             << std::defaultfloat << elapsed_seconds.count() << "\n";
 
-        std::cout << "Cells          : "
-                  << total_cells
-                  << std::endl;
+        std::string vtu_filename = "output/poisson-solution-" + std::to_string(cells_per_edge) + "cells.vtu";
+        poisson_problem.output_results(vtu_filename, true);
 
-        std::cout << "Total charge   : "
-                  << total_charge
-                  << std::endl;
-
-        std::cout << "Energy         : "
-                  << energy
-                  << std::endl;
+        std::cout << "Cells          : " << total_cells << std::endl;
+        std::cout << "Total charge   : " << total_charge << std::endl;
+        std::cout << "Energy         : " << std::fixed << std::setprecision(8) << energy << std::endl;
+        std::cout << "Solver Time    : " << std::defaultfloat << elapsed_seconds.count() << " sec" << std::endl;
     }
 
     file.close();
-
-    std::cout
-        << "\nResults written to energy_convergence.csv\n";
+    std::cout << "\nAll results written successfully to the 'output/' directory.\n";
 
     return 0;
 }
