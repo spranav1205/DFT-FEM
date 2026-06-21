@@ -107,6 +107,7 @@ class Poisson
         // Mesh, finite element (basis functions), and dof handler (dof to mesh mapping)
         Triangulation<dim> triangulation;
         DoFHandler<dim> dof_handler;
+        PreconditionJacobi<SparseMatrix<double>> jacobi_preconditioner;
         FE_Q<dim> fe;
 
         // Containers
@@ -229,6 +230,9 @@ void Poisson<dim>::assemble_system(SmearedCharge<dim> &forcing_function, Coullom
     
     VectorTools::interpolate_boundary_values(dof_handler, 0, boundary_condition, boundary_values);
     MatrixTools::apply_boundary_values(boundary_values, system_matrix, solution, system_rhs);
+
+    // Preconditioner setup
+    jacobi_preconditioner.initialize(system_matrix);
 }
 
 template <int dim>
@@ -238,7 +242,7 @@ int Poisson<dim>::solve(bool verbose)
     SolverCG<Vector<double>> solver(solver_control);
 
     // solver.solve(system_matrix, solution, system_rhs, PreconditionIdentity());
-    solver.solve(system_matrix, solution, system_rhs, JacobiPreconditioner());
+    solver.solve(system_matrix, solution, system_rhs, jacobi_preconditioner);
 
     if(verbose)
     {

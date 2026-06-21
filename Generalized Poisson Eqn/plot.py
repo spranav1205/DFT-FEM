@@ -13,16 +13,16 @@ if __name__ == "__main__":
     energy = data["energy"]
 
     # Plot total charge vs number of elements
-    plt.figure(figsize=(12, 5))
-    plt.subplot(1, 2, 1)
-    plt.plot(num_elements, total_charge, marker='o')
-    plt.xlabel("Number of Elements")
-    plt.ylabel("Total Charge")
-    plt.title("Total Charge vs Number of Elements")
-    plt.grid()
+    # plt.figure(figsize=(12, 5))
+    # plt.subplot(1, 2, 1)
+    # plt.plot(num_elements, total_charge, marker='o')
+    # plt.xlabel("Number of Elements")
+    # plt.ylabel("Total Charge")
+    # plt.title("Total Charge vs Number of Elements")
+    # plt.grid()
 
     # Plot energy vs number of elements
-    plt.subplot(1, 2, 2)
+    # plt.subplot(1, 2, 2)
     plt.plot(num_elements, energy, marker='o')
     plt.xlabel("Number of Elements")
     plt.ylabel("Energy")
