@@ -43,3 +43,6 @@ install_manifest.txt
 *.vtu
 *.pvtu
 *.vtk
+
+# Build directories
+build/
