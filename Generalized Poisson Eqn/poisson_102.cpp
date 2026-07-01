@@ -249,7 +249,7 @@ void Poisson<dim>::assemble_system(SmearedCharge<dim> &forcing_function)
 template <int dim>
 int Poisson<dim>::solve(bool verbose)
 {
-    SolverControl solver_control(1000, 1e-10); // Max 1000 iterations, tolerance 1e-10 i.e. ||Ax-b|| < 1e-10
+    SolverControl solver_control(2000, 1e-10); // Max 2000 iterations, tolerance 1e-10 i.e. ||Ax-b|| < 1e-10
     SolverCG<Vector<double>> solver(solver_control);
 
     // solver.solve(system_matrix, solution, system_rhs, PreconditionIdentity());

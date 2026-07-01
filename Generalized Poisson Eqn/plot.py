@@ -9,7 +9,7 @@ if __name__ == "__main__":
 
     # Extract the columns
     num_elements = data["total_cells"]
-    total_charge = data["total_charge"]
+    # total_charge = data["total_charge"]
     energy = data["energy"]
 
     # Plot total charge vs number of elements

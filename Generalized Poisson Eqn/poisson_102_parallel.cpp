@@ -311,7 +311,7 @@ template <int dim>
 int Poisson<dim>::solve(bool verbose)
 {
     // Use relative residual scaling based on the L2 norm of the RHS vector to match parallel sizing
-    SolverControl solver_control(1000, 1e-10);
+    SolverControl solver_control(2000, 1e-10);
     // Trilinos CG solves the distributed linear system using the MPI-aware matrix and vectors.
     TrilinosWrappers::SolverCG solver(solver_control);
 
@@ -505,52 +505,203 @@ double electrostatic_energy(SmearedCharge<3> &forcing_function, DoFHandler<3>& d
     return energy;
 }
 
-int main(int argc, char *argv[]) // CLI: ./poisson_102_parallel n_cells_per_edge
+// int main(int argc, char *argv[]) // CLI: ./poisson_102_parallel n_cells_per_edge
+// {
+//     try
+//     {
+//         Utilities::MPI::MPI_InitFinalize mpi_initialization(argc, argv, 1);
+//         Poisson<3> poisson_problem(3);  
+//         SmearedCharge<3> forcing_term;
+//         CoullombPotential<3> boundary_term; 
+        
+//         forcing_term.charge = 12.0;
+//         boundary_term.charge = 12.0;
+
+//         int n_cells_per_edge = 12;
+//         if (argc > 1)
+//             n_cells_per_edge = std::atoi(argv[1]);
+
+//         poisson_problem.setup_system(n_cells_per_edge, -10.0, 10.0, boundary_term);
+//         poisson_problem.assemble_system(forcing_term);
+
+//         // double total_charge = charge3D(forcing_term, poisson_problem.fe, poisson_problem.dof_handler);
+//         // if (Utilities::MPI::this_mpi_process(MPI_COMM_WORLD) == 0) std::cout << "Total charge in the system: " << total_charge << std::endl;
+
+//         auto start_time = std::chrono::high_resolution_clock::now();
+//         int num_iterations = poisson_problem.solve(false);
+//         auto end_time = std::chrono::high_resolution_clock::now();
+
+//         std::chrono::duration<double> elapsed_time = end_time - start_time;
+//         if (Utilities::MPI::this_mpi_process(MPI_COMM_WORLD) == 0)
+//         {
+//             std::cout << "Solver completed in " << elapsed_time.count() << " seconds." << std::endl;
+//             std::cout << "Number of CG iterations: " << num_iterations << std::endl;
+//         }
+        
+//         poisson_problem.output_results("./parallel_output/temp.vtu", true);
+
+//         double energy = electrostatic_energy(forcing_term, poisson_problem.dof_handler, poisson_problem.fe, poisson_problem.get_solution());
+        
+//         // Parallel: Ensure only rank 0 displays final calculated data to clear clutter
+//         if (Utilities::MPI::this_mpi_process(MPI_COMM_WORLD) == 0)
+//         {
+//             std::cout << "Electrostatic energy of the system: " << std::fixed << std::setprecision(8) << energy << std::endl;
+//         }
+//     }
+//     catch(const std::exception& e)
+//     {
+//         std::cerr << e.what() << '\n';
+//         return 1;
+//     }
+// }
+
+#include <deal.II/base/mpi.h>
+
+#include <chrono>
+#include <filesystem>
+#include <fstream>
+#include <iomanip>
+#include <iostream>
+#include <vector>
+
+int main(int argc, char *argv[])
 {
     try
     {
         Utilities::MPI::MPI_InitFinalize mpi_initialization(argc, argv, 1);
-        Poisson<3> poisson_problem(3);  
-        SmearedCharge<3> forcing_term;
-        CoullombPotential<3> boundary_term; 
-        
-        forcing_term.charge = 12.0;
-        boundary_term.charge = 12.0;
 
-        int n_cells_per_edge = 12;
-        if (argc > 1)
-            n_cells_per_edge = std::atoi(argv[1]);
+        const unsigned int my_rank =
+            Utilities::MPI::this_mpi_process(MPI_COMM_WORLD);
 
-        poisson_problem.setup_system(n_cells_per_edge, -10.0, 10.0, boundary_term);
-        poisson_problem.assemble_system(forcing_term);
-
-        // double total_charge = charge3D(forcing_term, poisson_problem.fe, poisson_problem.dof_handler);
-        // if (Utilities::MPI::this_mpi_process(MPI_COMM_WORLD) == 0) std::cout << "Total charge in the system: " << total_charge << std::endl;
-
-        auto start_time = std::chrono::high_resolution_clock::now();
-        int num_iterations = poisson_problem.solve(false);
-        auto end_time = std::chrono::high_resolution_clock::now();
-
-        std::chrono::duration<double> elapsed_time = end_time - start_time;
-        if (Utilities::MPI::this_mpi_process(MPI_COMM_WORLD) == 0)
+        // Mesh resolutions to test
+        const std::vector<int> cells_per_edge_list =
         {
-            std::cout << "Solver completed in " << elapsed_time.count() << " seconds." << std::endl;
-            std::cout << "Number of CG iterations: " << num_iterations << std::endl;
-        }
-        
-        poisson_problem.output_results("./parallel_output/temp.vtu", true);
+            20, 24
+        };
 
-        double energy = electrostatic_energy(forcing_term, poisson_problem.dof_handler, poisson_problem.fe, poisson_problem.get_solution());
-        
-        // Parallel: Ensure only rank 0 displays final calculated data to clear clutter
-        if (Utilities::MPI::this_mpi_process(MPI_COMM_WORLD) == 0)
+        if (my_rank == 0)
+            std::filesystem::create_directories("convergence parallel");
+
+        std::ofstream csv;
+
+        if (my_rank == 0)
         {
-            std::cout << "Electrostatic energy of the system: " << std::fixed << std::setprecision(8) << energy << std::endl;
+            csv.open("convergence parallel/energy_convergence.csv");
+
+            csv << "cells_per_edge,"
+                << "total_cells,"
+                << "cg_iterations,"
+                << "solve_time_sec,"
+                << "energy\n";
         }
+
+        for (const int n_cells_per_edge : cells_per_edge_list)
+        {
+            if (my_rank == 0)
+            {
+                std::cout
+                    << "\n=====================================\n"
+                    << "Running mesh with "
+                    << n_cells_per_edge
+                    << " cells per edge\n"
+                    << "=====================================\n";
+            }
+
+            Poisson<3> poisson_problem(4);
+
+            SmearedCharge<3> forcing_term;
+            CoullombPotential<3> boundary_term;
+
+            forcing_term.charge  = 12.0;
+            boundary_term.charge = 12.0;
+
+            poisson_problem.setup_system(
+                n_cells_per_edge,
+                -10.0,
+                10.0,
+                boundary_term);
+
+            poisson_problem.assemble_system(forcing_term);
+
+            auto start_time =
+                std::chrono::high_resolution_clock::now();
+
+            const int num_iterations =
+                poisson_problem.solve(false);
+
+            auto end_time =
+                std::chrono::high_resolution_clock::now();
+
+            const double elapsed_time =
+                std::chrono::duration<double>(
+                    end_time - start_time)
+                    .count();
+
+            const double energy =
+                electrostatic_energy(
+                    forcing_term,
+                    poisson_problem.dof_handler,
+                    poisson_problem.fe,
+                    poisson_problem.get_solution());
+
+            const unsigned int total_cells =
+                poisson_problem.triangulation
+                    .n_global_active_cells();
+
+            // Save VTU
+            {
+                std::string filename =
+                    "convergence parallel/solution_" +
+                    std::to_string(n_cells_per_edge) +
+                    ".vtu";
+
+                poisson_problem.output_results(
+                    filename,
+                    true);
+            }
+
+            if (my_rank == 0)
+            {
+                std::cout
+                    << "Cells/edge      : "
+                    << n_cells_per_edge << '\n'
+                    << "Total cells     : "
+                    << total_cells << '\n'
+                    << "CG iterations   : "
+                    << num_iterations << '\n'
+                    << "Solve time (s)  : "
+                    << elapsed_time << '\n'
+                    << "Energy          : "
+                    << std::setprecision(12)
+                    << energy << '\n';
+
+                csv
+                    << n_cells_per_edge << ","
+                    << total_cells << ","
+                    << num_iterations << ","
+                    << std::setprecision(16)
+                    << elapsed_time << ","
+                    << energy << "\n";
+
+                csv.flush();
+            }
+        }
+
+        if (my_rank == 0)
+        {
+            csv.close();
+
+            std::cout
+                << "\nConvergence study complete.\n"
+                << "Results saved to:\n"
+                << "  convergence parallel/energy_convergence.csv\n";
+        }
+
+        return 0;
     }
-    catch(const std::exception& e)
+    catch (const std::exception &e)
     {
-        std::cerr << e.what() << '\n';
+        std::cerr << e.what() << std::endl;
         return 1;
     }
 }
