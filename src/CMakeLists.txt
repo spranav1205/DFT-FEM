@@ -25,6 +25,19 @@ if(NOT DEAL_II_WITH_MPI)
     "*** deal.II must be built with MPI support. ***")
 endif()
 
+# ---- Benchmark Configurations ----
+# Set default values if not passed via the command line
+if(NOT DEFINED FE_DEGREE)
+  set(FE_DEGREE 3 CACHE STRING "Finite element polynomial degree")
+endif()
+
+if(NOT DEFINED MATRIX_FREE)
+  set(MATRIX_FREE 0 CACHE STRING "Use Matrix-Free solver backend (1=True, 0=False)")
+endif()
+
+message(STATUS "Configuring dft_fem with FE_DEGREE=${FE_DEGREE}, MATRIX_FREE=${MATRIX_FREE}")
+# ----------------------------------
+
 # Automatically collect sources
 file(GLOB PHYSICS_SRC CONFIGURE_DEPENDS
     physics/*.cpp)
@@ -42,6 +55,12 @@ target_include_directories(dft_fem PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/physics
     ${CMAKE_CURRENT_SOURCE_DIR}/numerics
+)
+
+# Forward the CMake options into the C++ compiler preprocessing flags
+target_compile_definitions(dft_fem PRIVATE
+    FE_DEGREE=${FE_DEGREE}
+    MATRIX_FREE=${MATRIX_FREE}
 )
 
 deal_II_setup_target(dft_fem)

@@ -12,22 +12,30 @@
 #include "physics/nuclear_charge_density.h"
 
 #include "numerics/matrix_poisson_solver.h"
-// #include "numerics/matrix_free_poisson_solver.h"
+#include "numerics/matrix_free_poisson_solver.h"
 
-// Fixed FE degree used by the matrix-free operator (compile-time constant).
-constexpr int fe_degree = 4;
+// ---- Compile-time configuration ----
+// Fallback to 3 if not specified via compiler flag (e.g., -DFE_DEGREE=3)
+#ifndef FE_DEGREE
+#  define FE_DEGREE 3
+#endif
+constexpr int fe_degree = FE_DEGREE;
 
-// ---- Backend switch: change this ONE line to swap solvers. ----
-// Matrix-free (fast, low memory, needs fe_degree fixed at compile time):
-// using SolverType = Numerics::MatrixFreePoissonSolver<3, fe_degree>;
-// Trilinos-assembled (reference/debug backend):
-using SolverType = Numerics::MatrixPoissonSolver<3>;
-// -----------------------------------------------------------------
+// Toggle this macro via compiler flag or manually to swap backends:
+// -DMATRIX_FREE=1 for Matrix-Free, -DMATRIX_FREE=0 for Assembled Matrix
+#ifndef MATRIX_FREE
+#  define MATRIX_FREE 0
+#endif
 
-// Helper: build a Trilinos vector view of the solution for AtomSystem's
-// energy computation, regardless of which backend's native VectorType
-// was produced. No-op copy for the Trilinos backend, element copy for
-// the matrix-free backend.
+#if MATRIX_FREE == 1
+  using SolverType = Numerics::MatrixFreePoissonSolver<3, fe_degree>;
+  const std::string method_name = "matrix-free";
+#else
+  using SolverType = Numerics::MatrixPoissonSolver<3>;
+  const std::string method_name = "matrix-assembled";
+#endif
+// ------------------------------------
+
 dealii::TrilinosWrappers::MPI::Vector
 to_trilinos_vector(const dealii::TrilinosWrappers::MPI::Vector &v,
                     const dealii::IndexSet &,
@@ -57,49 +65,65 @@ int main(int argc, char *argv[])
         const unsigned int my_rank =
             dealii::Utilities::MPI::this_mpi_process(MPI_COMM_WORLD);
 
-        const std::vector<int> cells_per_edge_list = {12};
+        // Edit this list to test different mesh sizes within a single execution
+        const std::vector<int> cells_per_edge_list = {24};
 
-        if (my_rank == 0)
-            std::filesystem::create_directories("convergence parallel");
+        const std::string output_dir = "benchmark_results";
+        const std::string csv_path   = output_dir + "/performance_study.csv";
 
-        std::ofstream csv;
         if (my_rank == 0)
         {
-            csv.open("convergence parallel/energy_convergence.csv");
-            csv << "cells_per_edge,total_cells,cg_iterations,solve_time_sec,energy\n";
+            std::filesystem::create_directories(output_dir);
+            
+            // Check if file exists to determine if we write headers
+            bool file_exists = std::filesystem::exists(csv_path);
+            std::ofstream csv(csv_path, std::ios::app);
+            if (!file_exists)
+            {
+                csv << "method,fe_degree,cells_per_edge,total_cells,dofs,"
+                    << "setup_time_sec,assemble_time_sec,solve_time_sec,"
+                    << "total_time_sec,cg_iterations,time_per_iter_sec,energy\n";
+            }
         }
 
         for (const int n_cells_per_edge : cells_per_edge_list)
         {
             if (my_rank == 0)
+            {
                 std::cout << "\n=====================================\n"
+                          << "Backend: " << method_name << " | FE Degree: " << fe_degree << "\n"
                           << "Running mesh with " << n_cells_per_edge << " cells per edge\n"
                           << "=====================================\n";
+            }
 
-            // ---- Physics: define the atom system ----
             Physics::AtomSystem<3> atom_system;
-            atom_system.add_atom(Physics::Atom<3>(dealii::Point<3>(0.0, 0.0, 0.0),
-                                                   /*charge=*/6.0,
-                                                   /*r_c=*/0.7));
-            atom_system.add_atom(Physics::Atom<3>(dealii::Point<3>(1.0, 1.0, 1.0),
-                                                   /*charge=*/6.0,
-                                                   /*r_c=*/0.7));
+            atom_system.add_atom(Physics::Atom<3>(dealii::Point<3>(0.0, 0.0, 0.0), 6.0, 0.7));
+            atom_system.add_atom(Physics::Atom<3>(dealii::Point<3>(1.0, 1.0, 1.0), 6.0, 0.7));
 
             Physics::SmearedCharge<3>    forcing_term  = atom_system.get_charge_density();
             Physics::CoulombPotential<3> boundary_term = atom_system.get_boundary_potential();
 
-            // ---- Numerics: solve (backend chosen by SolverType above) ----
             SolverType poisson_problem(fe_degree, atom_system); 
 
+            // 1. Time Setup
+            auto t0 = std::chrono::high_resolution_clock::now();
             poisson_problem.setup_system(n_cells_per_edge, -10.0, 10.0, boundary_term);
+            auto t1 = std::chrono::high_resolution_clock::now();
+            const double setup_time = std::chrono::duration<double>(t1 - t0).count();
+
+            // 2. Time Assembly
+            auto t2 = std::chrono::high_resolution_clock::now();
             poisson_problem.assemble_system(forcing_term);
+            auto t3 = std::chrono::high_resolution_clock::now();
+            const double assemble_time = std::chrono::duration<double>(t3 - t2).count();
 
-            auto start_time = std::chrono::high_resolution_clock::now();
+            // 3. Time Solver
+            auto t4 = std::chrono::high_resolution_clock::now();
             const int num_iterations = poisson_problem.solve(false);
-            auto end_time = std::chrono::high_resolution_clock::now();
-            const double elapsed_time =
-                std::chrono::duration<double>(end_time - start_time).count();
+            auto t5 = std::chrono::high_resolution_clock::now();
+            const double solve_time = std::chrono::duration<double>(t5 - t4).count();
 
+            // 4. Energy calculation
             dealii::TrilinosWrappers::MPI::Vector solution_trilinos =
                 to_trilinos_vector(poisson_problem.get_solution(),
                                     poisson_problem.locally_owned_dofs,
@@ -108,34 +132,37 @@ int main(int argc, char *argv[])
             const double energy = atom_system.electrostatic_energy(
                 poisson_problem.dof_handler, poisson_problem.fe, solution_trilinos);
 
+            // Metrics calculation
             const unsigned int total_cells = poisson_problem.triangulation.n_global_active_cells();
-
-            {
-                std::string filename = "convergence parallel/solution_" +
-                                        std::to_string(n_cells_per_edge) + ".vtu";
-                poisson_problem.output_results(filename, true);
-            }
+            const unsigned int total_dofs  = poisson_problem.dof_handler.n_dofs();
+            const double total_time        = setup_time + assemble_time + solve_time;
+            const double time_per_iter     = (num_iterations > 0) ? (solve_time / num_iterations) : 0.0;
 
             if (my_rank == 0)
             {
-                std::cout << "Cells/edge      : " << n_cells_per_edge << '\n'
-                          << "Total cells     : " << total_cells << '\n'
-                          << "CG iterations   : " << num_iterations << '\n'
-                          << "Solve time (s)  : " << elapsed_time << '\n'
-                          << "Energy          : " << std::setprecision(12) << energy << '\n';
+                std::cout << "Degrees of Freedom: " << total_dofs << '\n'
+                          << "Setup time (s)    : " << setup_time << '\n'
+                          << "Assemble time (s) : " << assemble_time << '\n'
+                          << "Solve time (s)    : " << solve_time << '\n'
+                          << "CG iterations     : " << num_iterations << '\n'
+                          << "Time/Iteration (s): " << time_per_iter << '\n'
+                          << "Energy            : " << std::setprecision(12) << energy << '\n';
 
-                csv << n_cells_per_edge << "," << total_cells << "," << num_iterations << ","
-                    << std::setprecision(16) << elapsed_time << "," << energy << "\n";
-                csv.flush();
+                // Append to CSV
+                std::ofstream csv(csv_path, std::ios::app);
+                csv << method_name << ","
+                    << fe_degree << ","
+                    << n_cells_per_edge << ","
+                    << total_cells << ","
+                    << total_dofs << ","
+                    << std::setprecision(6) << setup_time << ","
+                    << assemble_time << ","
+                    << solve_time << ","
+                    << total_time << ","
+                    << num_iterations << ","
+                    << time_per_iter << ","
+                    << std::setprecision(16) << energy << "\n";
             }
-        }
-
-        if (my_rank == 0)
-        {
-            csv.close();
-            std::cout << "\nConvergence study complete.\n"
-                      << "Results saved to:\n"
-                      << "  convergence parallel/energy_convergence.csv\n";
         }
 
         return 0;
