@@ -9,9 +9,9 @@ if [ ! -f "CMakeCache.txt" ]; then
 fi
 
 # Degrees to test: 2, 3, 4, 5
-for degree in 5; do
+for degree in 4; do
   # Methods to test: 0 (Assembled Matrix), 1 (Matrix-Free)
-  for mfree in 0; do
+  for mfree in 1; do
     
     echo "=========================================================="
     echo " CONFIGURING & COMPILING: FE_DEGREE=${degree} | MATRIX_FREE=${mfree}"

@@ -66,7 +66,7 @@ int main(int argc, char *argv[])
             dealii::Utilities::MPI::this_mpi_process(MPI_COMM_WORLD);
 
         // Edit this list to test different mesh sizes within a single execution
-        const std::vector<int> cells_per_edge_list = {24};
+        const std::vector<int> cells_per_edge_list = {22, 24};
 
         const std::string output_dir = "benchmark_results";
         const std::string csv_path   = output_dir + "/performance_study.csv";
