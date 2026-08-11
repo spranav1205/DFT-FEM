@@ -1,20 +1,18 @@
 cmake_minimum_required(VERSION 3.13.4)
 
-find_package(deal.II 9.3.0
+# 1. project() MUST come before find_package so CMake initializes the C++ compiler first
+project(dft_fem LANGUAGES CXX)
+
+# 2. Find deal.II (REQUIRED automatically handles missing package errors)
+find_package(deal.II 9.7.1 REQUIRED
   HINTS ${DEAL_II_DIR} ${deal.II_DIR} ../ ../../ $ENV{DEAL_II_DIR}
 )
 
-if(NOT deal.II_FOUND)
-  message(FATAL_ERROR "\n"
-    "*** Could not locate a (sufficiently recent) version of deal.II. ***\n\n"
-    "Pass -DDEAL_II_DIR=/path/to/deal.II or set the DEAL_II_DIR environment variable."
-  )
-endif()
-
+# 3. Initialize deal.II compiler flags and variables
 deal_II_initialize_cached_variables()
 
-project(dft_fem LANGUAGES CXX)
-
+# 4. Feature checks
+# IMPORTANT: If you recently uninstalled Trilinos, comment out this check!
 if(NOT DEAL_II_WITH_TRILINOS)
   message(FATAL_ERROR
     "*** deal.II must be built with Trilinos support. ***")
@@ -26,7 +24,6 @@ if(NOT DEAL_II_WITH_MPI)
 endif()
 
 # ---- Benchmark Configurations ----
-# Set default values if not passed via the command line
 if(NOT DEFINED FE_DEGREE)
   set(FE_DEGREE 3 CACHE STRING "Finite element polynomial degree")
 endif()
@@ -38,12 +35,9 @@ endif()
 message(STATUS "Configuring dft_fem with FE_DEGREE=${FE_DEGREE}, MATRIX_FREE=${MATRIX_FREE}")
 # ----------------------------------
 
-# Automatically collect sources
-file(GLOB PHYSICS_SRC CONFIGURE_DEPENDS
-    physics/*.cpp)
-
-file(GLOB NUMERICS_SRC CONFIGURE_DEPENDS
-    numerics/*.cpp)
+# Collect source files
+file(GLOB PHYSICS_SRC CONFIGURE_DEPENDS physics/*.cpp)
+file(GLOB NUMERICS_SRC CONFIGURE_DEPENDS numerics/*.cpp)
 
 add_executable(dft_fem
     main.cpp
@@ -57,10 +51,11 @@ target_include_directories(dft_fem PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/numerics
 )
 
-# Forward the CMake options into the C++ compiler preprocessing flags
+# Pass preprocessor definitions
 target_compile_definitions(dft_fem PRIVATE
     FE_DEGREE=${FE_DEGREE}
     MATRIX_FREE=${MATRIX_FREE}
 )
 
+# Attach deal.II headers, build flags, and link targets
 deal_II_setup_target(dft_fem)

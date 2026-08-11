@@ -66,7 +66,7 @@ int main(int argc, char *argv[])
             dealii::Utilities::MPI::this_mpi_process(MPI_COMM_WORLD);
 
         // Edit this list to test different mesh sizes within a single execution
-        const std::vector<int> cells_per_edge_list = {22, 24};
+        const std::vector<int> cells_per_edge_list = {12};
 
         const std::string output_dir = "benchmark_results";
         const std::string csv_path   = output_dir + "/performance_study.csv";
@@ -97,8 +97,8 @@ int main(int argc, char *argv[])
             }
 
             Physics::AtomSystem<3> atom_system;
-            atom_system.add_atom(Physics::Atom<3>(dealii::Point<3>(0.0, 0.0, 0.0), 6.0, 0.7));
-            atom_system.add_atom(Physics::Atom<3>(dealii::Point<3>(1.0, 1.0, 1.0), 6.0, 0.7));
+            atom_system.add_atom(Physics::Atom<3>(dealii::Point<3>(0.0, 0.0, 0.0), 12.0, 0.7));
+            // atom_system.add_atom(Physics::Atom<3>(dealii::Point<3>(1.0, 1.0, 1.0), 6.0, 0.7));
 
             Physics::SmearedCharge<3>    forcing_term  = atom_system.get_charge_density();
             Physics::CoulombPotential<3> boundary_term = atom_system.get_boundary_potential();
