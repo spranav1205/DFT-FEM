@@ -733,10 +733,10 @@ int main(int argc, char *argv[])
 
       const std::vector<unsigned int> resolutions = {8, 12, 16, 24, 32};
 
-      std::vector<PoissonProblem<3, 3>::RunSummary> results;
+      std::vector<PoissonProblem<3, 4>::RunSummary> results;
       for (const unsigned int n_cells : resolutions)
         {
-          PoissonProblem<3, 3> poisson_problem(n_cells);
+          PoissonProblem<3, 4> poisson_problem(n_cells);
           results.push_back(poisson_problem.run());
         }
 
