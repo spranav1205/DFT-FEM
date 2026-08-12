@@ -23,7 +23,7 @@ make -j
 
 // ---- Preprocessor Backend Configuration ----
 #ifndef FE_DEGREE
-#  define FE_DEGREE 4
+#  define FE_DEGREE 5
 #endif
 constexpr int fe_degree = FE_DEGREE;
 
@@ -33,13 +33,13 @@ constexpr int fe_degree = FE_DEGREE;
 #endif
 
 // #if USE_GPU == 1
-#  include "numerics/matrix_free_poisson_solver_gpu.h"
-using SolverType = Numerics::MatrixFreePoissonSolverGPU<3, fe_degree>;
-const std::string method_name = "gpu-matrix-free";
+// #  include "numerics/matrix_free_poisson_solver_gpu.h"
+// using SolverType = Numerics::MatrixFreePoissonSolverGPU<3, fe_degree>;
+// const std::string method_name = "gpu-matrix-free";
 // #else
-// #  include "numerics/matrix_free_poisson_solver.h"
-//    using SolverType = Numerics::MatrixFreePoissonSolver<3, fe_degree>;
-//    const std::string method_name = "cpu-matrix-free";
+#  include "numerics/matrix_free_poisson_solver.h"
+   using SolverType = Numerics::MatrixFreePoissonSolver<3, fe_degree>;
+   const std::string method_name = "cpu-matrix-free";
 // #endif
 
 
@@ -55,7 +55,7 @@ int main(int argc, char *argv[])
             dealii::Utilities::MPI::this_mpi_process(MPI_COMM_WORLD);
 
         // Sweep from 24 to 32 cells per edge
-        const std::vector<int> cells_per_edge_list = {20, 24, 28, 32};
+        const std::vector<int> cells_per_edge_list = {24};
 
         const std::string output_dir = "benchmark_results";
         const std::string csv_path   = output_dir + "/performance_study.csv";
