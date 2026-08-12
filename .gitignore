@@ -49,3 +49,4 @@ install_manifest.txt
 
 # Build directories
 build/
+build_*/
