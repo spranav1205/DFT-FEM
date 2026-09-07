@@ -63,7 +63,7 @@ namespace Numerics
         const auto &atoms = this->atom_system.get_atoms();
         const double refinement_factor = 2.5;
 
-        for (unsigned int cycle = 0; cycle < 3; ++cycle)
+        for (unsigned int cycle = 0; cycle < 0; ++cycle)
         {
             int marked = 0;
 
