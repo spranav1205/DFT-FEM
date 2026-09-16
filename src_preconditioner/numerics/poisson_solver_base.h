@@ -58,6 +58,8 @@ namespace Numerics
 
         dealii::IndexSet locally_owned_dofs;
         dealii::IndexSet locally_relevant_dofs;
+
+        unsigned int n_cells_per_edge = 0;
     };
 }
 

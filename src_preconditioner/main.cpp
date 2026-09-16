@@ -119,7 +119,7 @@ int main(int argc, char *argv[])
 
             // 3. Time Solver
             auto t4 = std::chrono::high_resolution_clock::now();
-            const int num_iterations = poisson_problem.solve(false, true);
+            const int num_iterations = poisson_problem.solve(false, false);
             auto t5 = std::chrono::high_resolution_clock::now();
             const double solve_time = std::chrono::duration<double>(t5 - t4).count();
 

@@ -56,6 +56,8 @@ namespace Numerics
         auto &constraints   = this->constraints;
         auto &pcout         = this->pcout;
 
+        this->n_cells_per_edge = n_cells_per_edge;
+
         GridGenerator::subdivided_hyper_cube(triangulation, n_cells_per_edge, start, end);
 
         // Refine around each nucleus, identical logic to MatrixPoissonSolver:
@@ -64,7 +66,7 @@ namespace Numerics
         const auto &atoms = this->atom_system.get_atoms();
         const double refinement_factor = 2.5;
 
-        for (unsigned int cycle = 0; cycle < 0; ++cycle)
+        for (unsigned int cycle = 0; cycle < 2; ++cycle)
         {
             int marked = 0;
 
@@ -197,18 +199,18 @@ namespace Numerics
         SolverControl solver_control(2000, 1e-10);
         SolverCG<LinearAlgebra::distributed::Vector<double>> solver(solver_control);
 
-        if(custom_preconditioner)
+        if (custom_preconditioner)
         {
             FDPreconditioner<dim, SystemMatrixType> preconditioner;
+
             preconditioner.initialize(system_matrix,
-                                     system_rhs_unconstrained,
-                                     this->dof_handler,
-                                     this->constraints,
-                                     mf_storage,
-                                     0);
+                                    system_rhs_unconstrained,
+                                    this->dof_handler,
+                                    this->constraints,
+                                    mf_storage,
+                                    this->n_cells_per_edge);
 
             this->pcout << "Using FD preconditioner." << std::endl;
-                                    
             solution = 0;
             solver.solve(system_matrix, solution, system_rhs, preconditioner);
         }
