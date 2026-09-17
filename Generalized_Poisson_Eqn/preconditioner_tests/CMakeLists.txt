@@ -14,7 +14,7 @@ deal_ii_initialize_cached_variables()
 
 # 4. Define the target.
 set(TARGET "dft_fem")
-set(TARGET_SRC poisson_402.cpp)
+set(TARGET_SRC poisson_403.cpp)
 
 add_executable(${TARGET} ${TARGET_SRC})
 
