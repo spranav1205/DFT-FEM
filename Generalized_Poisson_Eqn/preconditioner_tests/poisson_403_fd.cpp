@@ -566,13 +566,14 @@ make_patch_boxes(double start, double h)
 
     // Center (fine): FD box [2,6]^3, ownership region = refined block [3,5]^3
     {
-        const auto i = add("center", {2, 6}, {2, 6}, {2, 6}, 0.5 * h);
-        for (unsigned int d = 0; d < 3; ++d)
-        {
-            boxes[i].own_lo[d] = X(3);
-            boxes[i].own_hi[d] = X(5);
-        }
+    const auto i = add("center", {2, 6}, {2, 6}, {2, 6}, 0.5 * h);
+    const double fine_pad = 0.5 * h;   // one fine cell, in real units
+    for (unsigned int d = 0; d < 3; ++d)
+    {
+        boxes[i].own_lo[d] = X(3) + fine_pad;
+        boxes[i].own_hi[d] = X(5) - fine_pad;
     }
+}
 
     add("top", {0, 8}, {0, 8}, {5, 8}, h);
     add("bottom", {0, 8}, {0, 8}, {0, 3}, h);
@@ -581,8 +582,8 @@ make_patch_boxes(double start, double h)
     add("side_y_hi", {0, 8}, {5, 8}, {2, 6}, h);
 
     const double m = end_piece_y_margin_cells;
-    add("end_x_lo", {0, 3}, {3 - m, 5 + m}, {2, 6}, h);
-    add("end_x_hi", {5, 8}, {3 - m, 5 + m}, {2, 6}, h);
+    // add("end_x_lo", {0, 3}, {3 - m, 5 + m}, {2, 6}, h);
+    // add("end_x_hi", {5, 8}, {3 - m, 5 + m}, {2, 6}, h);
 
     return boxes;
 }
