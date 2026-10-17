@@ -14,6 +14,8 @@
 //       outer  patch : entire domain, h, acts on remaining dofs (minus middle and inner)
 //     Dof ownership is strictly disjoint (finest layer claims first), so
 //     P = sum_p R_p^T A_p^{-1} R_p is symmetric (block-Jacobi with FD blocks) and valid for CG.
+//      
+//  HANGING NODES -> Identity on constrained dofs
 //
 // Usage: ./prog [n_coarse] [domain_start] [domain_end]
 //               [mid_first] [mid_count] [inner_first] [inner_count] [overlap]
