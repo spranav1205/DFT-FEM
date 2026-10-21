@@ -1,0 +1,145 @@
+# deal.II Schwarz Benchmark — Performance Progress
+
+**Purpose:** Track optimization work and preserve findings for the next session.
+
+## 1. Benchmark overview
+
+- **Language:** C++
+- **Framework:** deal.II 9.4
+- **Problem:** 3D degree-4 finite-element Laplace operator
+- **Preconditioner:** Two-level refined overlapping Schwarz / fast diagonalization
+- **Executable:** `bench`
+- **Workload:** Setup followed by approximately 100 preconditioner applications
+- Phase-specific timing is already implemented in the benchmark.
+
+## 2. Build configuration
+
+```cmake
+set(FE_DEGREE 4 CACHE STRING "FE_Q polynomial degree")
+option(BENCH_NATIVE "Compile with -march=native" ON)
+
+add_executable(bench bench_schwarz.cpp)
+target_compile_definitions(bench PRIVATE FE_DEGREE=${FE_DEGREE})
+target_compile_options(bench PRIVATE
+    -O3 -fno-math-errno -g -fno-omit-frame-pointer)
+
+if(BENCH_NATIVE)
+    target_compile_options(bench PRIVATE -march=native)
+endif()
+
+deal_ii_setup_target(bench)
+```
+
+`-fopenmp-simd` may be needed for OpenMP SIMD directives. However, the axis-0 reduction remained scalar in the inspected assembly.
+
+## 3. Completed work: SIMD optimization
+
+### Axes 1 and 2
+
+- Implemented explicit AVX2 SIMD using four doubles per vector.
+- Assembly confirmed packed operations: `ymm` registers, `vfmadd...pd`, and `vmovupd`.
+- Reported speedup: approximately **25%** from the axis-1/2 changes.
+
+### Axis 0
+
+- The inner reduction still uses scalar double instructions such as `vfmadd231sd`.
+- The attempted SIMD reduction pragma did not produce packed SIMD.
+- Potential next optimization: vectorize across output rows, after checking matrix layout and whether packing the transform matrix would pay off.
+
+## 4. CPU profiling results
+
+A representative `perf report --no-children` showed:
+
+| Function | Self time |
+|---|---:|
+| `TwoFDOverlappingSchwarzPreconditioner<3>::vmult` | 52.87% |
+| `TwoFDOverlappingSchwarzPreconditioner<3>::apply_axis` | 38.91% |
+| deal.II Laplace operator | 1.54% |
+
+These are **self-time percentages**, not inclusive call-tree percentages.
+
+A cache-miss sampling report attributed approximately:
+- 89.60% of sampled L1 load misses to `apply_axis`
+- 9.42% to `vmult`
+
+This is sampled miss attribution, **not the percentage of execution time lost to cache misses**.
+
+## 5. Cache measurements
+
+Representative whole-program measurements:
+
+| Metric | Count |
+|---|---:|
+| L1 data-cache loads | 74.36 billion |
+| L1 load misses | 4.745 billion |
+| Approximate L1 load-miss ratio | 6.38% |
+| LLC loads | 205.97 million |
+| LLC load misses | 13.58 million |
+| Approximate LLC-load miss ratio | 6.60% |
+| Elapsed time | 23.33 ± 0.65 seconds |
+
+Important interpretation:
+- L1 misses do not necessarily access DRAM; many can be served by L2 or LLC.
+- Cache-miss counts cannot directly be converted into seconds lost.
+- The counters cover the whole benchmark, including setup.
+
+## 6. Memory-stall investigation
+
+The generic `stalled-cycles-backend` event was unsupported.
+
+Intel-specific event searches did not reveal usable L1/L2 memory-stall events. However, `perf list` exposed these memory-controller events:
+
+```text
+uncore_imc_free_running_0/data_read/
+uncore_imc_free_running_0/data_write/
+uncore_imc_free_running_0/data_total/
+
+uncore_imc_free_running_1/data_read/
+uncore_imc_free_running_1/data_write/
+uncore_imc_free_running_1/data_total/
+```
+
+These may help estimate DRAM traffic, but their units and scaling still need verification.
+
+## 7. Next steps
+
+1. Check event units:
+
+   ```bash
+   perf list -v | grep -A8 -B3 \
+     'uncore_imc_free_running_0/data_read'
+   ```
+
+2. Identify the CPU model:
+
+   ```bash
+   lscpu | grep -E 'Model name|Socket|Core|Thread'
+   ```
+
+3. Measure memory-controller traffic on an otherwise idle machine:
+
+   ```bash
+   perf stat -a -r 3 \
+     -e uncore_imc_free_running_0/data_read/ \
+     -e uncore_imc_free_running_0/data_write/ \
+     -e uncore_imc_free_running_1/data_read/ \
+     -e uncore_imc_free_running_1/data_write/ \
+     -- ./bench
+   ```
+
+   This is a system-wide measurement. Verify the event units before converting the results to bytes or bandwidth.
+
+4. Use the existing phase timings to compare controlled code variants.
+
+5. Test axis-0 SIMD separately from memory-layout changes.
+
+6. Repeat runs under similar system load. One recent timing had 6.5% run-to-run variation.
+
+## 8. Current working hypothesis
+
+`apply_axis` is the main optimization target. Axes 1 and 2 already benefit from explicit SIMD. Axis 0 remains a candidate for further vectorization.
+
+The cache measurements show many L1 misses, but it is not yet established whether DRAM bandwidth, memory latency, or arithmetic throughput is the primary remaining bottleneck.
+
+**Next decision:** use the memory-controller measurements and controlled timing comparisons to decide whether to prioritize data reuse and memory access patterns or axis-0 SIMD.
+

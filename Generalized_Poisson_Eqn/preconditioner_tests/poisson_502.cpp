@@ -70,6 +70,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include <immintrin.h>
 
 using namespace dealii;
 
@@ -519,31 +520,91 @@ TwoFDOverlappingSchwarzPreconditioner<dim>::get_eig(unsigned int degree,
     return e1;
 }
 
-// out_ia = sum_m mat[ia*na + m] * in_m  along the given axis of the lattice
-template <int dim>
-void TwoFDOverlappingSchwarzPreconditioner<dim>::apply_axis(const std::vector<double> &mat,
-                                                            const unsigned int na,
-                                                            const std::vector<double> &in,
-                                                            std::vector<double> &out,
-                                                            const std::array<unsigned int, 3> &n,
-                                                            const unsigned int axis)
+static inline void sum_axpy(const double *__restrict a, const unsigned nm,
+                            const double *__restrict x, const std::size_t ld,
+                            double *__restrict y, const std::size_t len)
 {
-    const unsigned int stride[3] = {1, n[0], n[0] * n[1]};
-    const unsigned int sa = stride[axis];
+    std::size_t p = 0;
 
-    for (unsigned int k = 0; k < n[2]; ++k)
-        for (unsigned int j = 0; j < n[1]; ++j)
-            for (unsigned int i = 0; i < n[0]; ++i)
+    for (; p + 16 <= len; p += 16)
+    {
+        __m256d c0 = _mm256_setzero_pd(), c1 = c0, c2 = c0, c3 = c0;
+        for (unsigned m = 0; m < nm; ++m)
+        {
+            const __m256d va = _mm256_set1_pd(a[m]);
+            const double *xp = x + m * ld + p;
+            c0 = _mm256_fmadd_pd(va, _mm256_loadu_pd(xp),      c0);
+            c1 = _mm256_fmadd_pd(va, _mm256_loadu_pd(xp + 4),  c1);
+            c2 = _mm256_fmadd_pd(va, _mm256_loadu_pd(xp + 8),  c2);
+            c3 = _mm256_fmadd_pd(va, _mm256_loadu_pd(xp + 12), c3);
+        }
+        _mm256_storeu_pd(y + p,      c0);
+        _mm256_storeu_pd(y + p + 4,  c1);
+        _mm256_storeu_pd(y + p + 8,  c2);
+        _mm256_storeu_pd(y + p + 12, c3);
+    }
+    for (; p + 4 <= len; p += 4)
+    {
+        __m256d c = _mm256_setzero_pd();
+        for (unsigned m = 0; m < nm; ++m)
+            c = _mm256_fmadd_pd(_mm256_set1_pd(a[m]),
+                                _mm256_loadu_pd(x + m * ld + p), c);
+        _mm256_storeu_pd(y + p, c);
+    }
+    for (; p < len; ++p)
+    {
+        double s = 0.0;
+        for (unsigned m = 0; m < nm; ++m)
+            s += a[m] * x[m * ld + p];
+        y[p] = s;
+    }
+}
+
+template <int dim>
+void TwoFDOverlappingSchwarzPreconditioner<dim>::apply_axis(
+    const std::vector<double> &mat,
+    const unsigned int na,
+    const std::vector<double> &in,
+    std::vector<double> &out,
+    const std::array<unsigned int, 3> &n,
+    const unsigned int axis)
+{
+    const unsigned int n0 = n[0];
+    const unsigned int n1 = n[1];
+    const unsigned int n2 = n[2];
+
+    if (axis == 0)
+    {
+        for (unsigned k = 0; k < n2; ++k)
+            for (unsigned j = 0; j < n1; ++j)
             {
-                const unsigned int idx = i + j * n[0] + k * n[0] * n[1];
-                const unsigned int ia = (axis == 0) ? i : (axis == 1 ? j : k);
-                const unsigned int base = idx - ia * sa;
-                const double *row = &mat[static_cast<std::size_t>(ia) * na];
-                double sum = 0.0;
-                for (unsigned int m = 0; m < na; ++m)
-                    sum += row[m] * in[base + m * sa];
-                out[idx] = sum;
+                const std::size_t off = std::size_t(j) * n0 + std::size_t(k) * n0 * n1;
+                // a = input line (contiguous), "x" = matT rows
+                sum_axpy(&in[off], na, mat.data(), na, &out[off], n0);
             }
+    }
+    else if (axis == 1)
+    {
+        for (unsigned k = 0; k < n2; ++k)
+        {
+            const std::size_t kbase = std::size_t(k) * n0 * n1;
+            for (unsigned j = 0; j < n1; ++j)
+                sum_axpy(&mat[std::size_t(j) * na], n1,
+                        &in[kbase], n0, &out[kbase + std::size_t(j) * n0], n0);
+        }
+    }
+    else
+    {
+        const std::size_t plane = std::size_t(n0) * n1;
+        constexpr std::size_t PB = 128;               // tune: n2*PB*8 B should fit in L1
+        for (std::size_t p0 = 0; p0 < plane; p0 += PB)
+        {
+            const std::size_t len = std::min(PB, plane - p0);
+            for (unsigned k = 0; k < n2; ++k)
+                sum_axpy(&mat[std::size_t(k) * na], n2,
+                        &in[p0], plane, &out[std::size_t(k) * plane + p0], len);
+        }
+    }
 }
 
 // Solves (Kx x My x Mz + Mx x Ky x Mz + Mx x My x Kz) u = f in place (u = patch.loc)
@@ -555,7 +616,7 @@ void TwoFDOverlappingSchwarzPreconditioner<dim>::fd_solve(const Patch &patch) co
     auto &t1 = patch.t1;
     auto &t2 = patch.t2;
 
-    apply_axis(patch.eig[0]->St, n[0], u, t1, n, 0);
+    apply_axis(patch.eig[0]->S, n[0], u, t1, n, 0);
     apply_axis(patch.eig[1]->St, n[1], t1, t2, n, 1);
     apply_axis(patch.eig[2]->St, n[2], t2, t1, n, 2);
 
@@ -567,7 +628,7 @@ void TwoFDOverlappingSchwarzPreconditioner<dim>::fd_solve(const Patch &patch) co
 
     apply_axis(patch.eig[2]->S, n[2], t1, t2, n, 2);
     apply_axis(patch.eig[1]->S, n[1], t2, t1, n, 1);
-    apply_axis(patch.eig[0]->S, n[0], t1, u, n, 0);
+    apply_axis(patch.eig[0]->St, n[0], t1, u, n, 0);
 }
 
 template <int dim>
@@ -1016,16 +1077,16 @@ static double seconds(const std::chrono::high_resolution_clock::time_point &a,
 int main(int argc, char **argv)
 {
     constexpr unsigned int fe_degree = 4;
-
+   
     // Parametric sweep: minimum, maximum, and step size.
-    const unsigned int n_min  = argc > 1 ? std::stoul(argv[1]) : 16;
+    const unsigned int n_min  = argc > 1 ? std::stoul(argv[1]) : 24;
     const unsigned int n_max  = argc > 2 ? std::stoul(argv[2]) : 24;
     const unsigned int n_step = argc > 3 ? std::stoul(argv[3]) : 4;
 
     if (n_step == 0 || n_min > n_max)
         throw std::invalid_argument("Invalid coarse mesh sweep parameters.");
 
-    const std::string csv_path = "schwarz_fd_graphene_scaling.csv";
+    const std::string csv_path = "schwarz_performance.csv";
     const bool csv_exists = std::filesystem::exists(csv_path);
     std::ofstream csv(csv_path, std::ios::app);
 
@@ -1158,6 +1219,7 @@ int main(int argc, char **argv)
             const auto t2 = std::chrono::high_resolution_clock::now();
 
             const double energy = problem.compute_electrostatic_energy();
+            // const double energy = 0.0; // energy computation is commented out for Jacobi
 
             record("jacobi", cfg, problem,
                    diag_time + seconds(t0, t1),

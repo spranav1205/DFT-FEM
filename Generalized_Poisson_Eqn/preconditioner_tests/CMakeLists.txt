@@ -18,5 +18,9 @@ set(TARGET_SRC poisson_502.cpp)
 
 add_executable(${TARGET} ${TARGET_SRC})
 
+target_compile_options(${TARGET} PRIVATE
+  -O3 -march=native
+  -fno-math-errno -fno-trapping-math -fassociative-math -fno-signed-zeros)
+
 # 5. Wire the target up to deal.II (include paths, libraries, MPI, LAPACK, etc.)
 deal_ii_setup_target(${TARGET})
